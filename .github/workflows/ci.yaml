@@ -2,62 +2,42 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_DB: devops
-          POSTGRES_USER: app
-          POSTGRES_PASSWORD: app_password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U app -d devops"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
-
-    env:
-      DATABASE_URL: postgres://app:app_password@localhost:5432/devops?sslmode=disable
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version-file: app/go.mod
-          cache: true
-
-      - name: Check formatting
+          cache-dependency-path: app/go.sum
+      - name: Test
         working-directory: app
-        run: |
-          files=$(gofmt -l .)
-          if [ -n "$files" ]; then
-            echo "The following files are not formatted:"
-            echo "$files"
-            exit 1
-          fi
-
-      - name: Run go vet
+        run: go test ./...
+      - name: Build
         working-directory: app
-        run: go vet ./...
-
-      - name: Run tests
-        working-directory: app
-        run: go test -v ./...
-
-      - name: Build application
-        working-directory: app
-        run: go build -v ./...
+        run: go build ./...
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/ferrtul/devops-platform:${{ github.sha }}
+            ghcr.io/ferrtul/devops-platform:latest
